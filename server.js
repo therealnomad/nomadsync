@@ -129,7 +129,10 @@ app.post('/api/jobs', verifyToken, (req, res) => {
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         [title, description, customer_name, customer_address, customer_phone, scheduled_date, scheduled_time, assigned_to, req.userId],
         (err, result) => {
-          if (err) return res.status(500).send('Error creating job');
+          if (err) {
+            console.error('Database error:', err);
+            return res.status(500).send('Error creating job');
+          }
           res.status(200).send({ message: 'Job created successfully', jobId: result.insertId });
         }
       );
@@ -181,6 +184,82 @@ const storage = multer.diskStorage({
   filename: (req, file, cb) => {
     cb(null, `${Date.now()}-${file.originalname}`);
   }
+});
+
+// Get all jobs
+app.get('/api/jobs', verifyToken, (req, res) => {
+  db.query(
+    `SELECT j.*, u.full_name as assigned_to_name 
+     FROM jobs j
+     LEFT JOIN users u ON j.assigned_to = u.id`,
+    (err, results) => {
+      if (err) return res.status(500).send('Error fetching jobs');
+      res.status(200).send(results);
+    }
+  );
+});
+
+// Create job
+app.post('/api/jobs', verifyToken, (req, res) => {
+  const { title, description, customer_name, customer_address, scheduled_date, assigned_to } = req.body;
+  
+  db.query(
+    `INSERT INTO jobs 
+     (title, description, customer_name, customer_address, scheduled_date, assigned_to, created_by) 
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [title, description, customer_name, customer_address, scheduled_date, assigned_to, req.userId],
+    (err, result) => {
+      if (err) return res.status(500).send('Error creating job');
+      res.status(200).send({ message: 'Job created successfully' });
+    }
+  );
+});
+
+// Get users by role
+app.get('/api/users', verifyToken, (req, res) => {
+  const { role } = req.query;
+  let query = 'SELECT id, username, full_name, role FROM users';
+  const params = [];
+  
+  if (role) {
+    query += ' WHERE role = ?';
+    params.push(role);
+  }
+  
+  db.query(query, params, (err, results) => {
+    if (err) return res.status(500).send('Error fetching users');
+    res.status(200).send(results);
+  });
+});
+
+// Create user (admin only)
+app.post('/api/users', verifyToken, (req, res) => {
+  // Verify admin role first
+  db.query(
+    'SELECT role FROM users WHERE id = ?',
+    [req.userId],
+    (err, results) => {
+      if (err || results[0].role !== 'admin') {
+        return res.status(403).send('Only admins can create users');
+      }
+    // Validate input
+    if (!req.body.username || !req.body.password || !req.body.full_name) {
+      return res.status(400).send({ message: 'Username, password and full name are required' });
+        }
+        
+      const { username, password, full_name, role } = req.body;
+      const hashedPassword = bcrypt.hashSync(password, 8);
+      
+      db.query(
+        'INSERT INTO users (username, password, full_name, role) VALUES (?, ?, ?, ?)',
+        [username, hashedPassword, full_name, role],
+        (err, result) => {
+          if (err) return res.status(500).send('Error creating user');
+          res.status(200).send({ message: 'User created successfully' });
+        }
+      );
+    }
+  );
 });
 
 const upload = multer({ storage });
